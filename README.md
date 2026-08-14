@@ -1,7 +1,7 @@
 # sp-tools
 
 A Claude plugin marketplace holding diagnostic skills for Redis Enterprise
-support packages. Colleagues add the marketplace once and then receive updates by
+support packages. Add the marketplace once and then receive updates by
 refreshing it, rather than being sent a new file each time something changes.
 
 ## For users: install
@@ -15,7 +15,7 @@ If the install summary says `Run /reload-plugins to activate.`, run that.
 
 Then just ask for what you want — the skill triggers on its own:
 
-> What's the pers-3950 database doing in ~/Downloads/debuginfo.ABC123.tar.gz?
+> What's the activity-db database doing in ~/Downloads/debuginfo.ABC123.tar.gz?
 
 > Which commands are eating CPU in this support package?
 
