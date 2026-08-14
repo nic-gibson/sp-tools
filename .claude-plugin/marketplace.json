@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "support package tools",
+  "description": "Diagnostic skills for working with Redis Enterprise support packages.",
+  "owner": {
+    "name": "Nic Gibson",
+    "email": "nic.gibson@redis.com"
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "command-stats",
+      "source": "./plugins/command-stats",
+      "displayName": "Redis Diagnostics",
+      "description": "Analyse Redis Enterprise debuginfo support packages. Produces a per-database INFO commandstats report and screens package pairs for counter resets before any before/after comparison.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Nic Gibson",
+        "email": "nic.gibson@redis.com"
+      },
+      "category": "diagnostics",
+      "tags": [
+        "redis",
+        "redis-enterprise",
+        "support",
+        "debuginfo",
+        "commandstats",
+        "performance",
+        "rladmin"
+      ],
+      "keywords": [
+        "redis",
+        "debuginfo",
+        "commandstats",
+        "latencystats",
+        "shards",
+        "support-package"
+      ],
+      "license": "Apache-2.0"
+    }
+  ]
+}
