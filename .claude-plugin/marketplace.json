@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
-  "name": "support package tools",
+  "name": "sp-tools",
   "description": "Diagnostic skills for working with Redis Enterprise support packages.",
   "owner": {
     "name": "Nic Gibson",
@@ -13,7 +13,7 @@
     {
       "name": "command-stats",
       "source": "./plugins/command-stats",
-      "displayName": "Redis Diagnostics",
+      "displayName": "Redis Command Stats",
       "description": "Analyse Redis Enterprise debuginfo support packages. Produces a per-database INFO commandstats report and screens package pairs for counter resets before any before/after comparison.",
       "version": "1.0.0",
       "author": {

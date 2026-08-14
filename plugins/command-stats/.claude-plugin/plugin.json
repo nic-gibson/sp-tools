@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
-  "name": "command stats",
+  "name": "command-stats",
   "displayName": "Redis Command Stats",
   "description": "Analyse Redis Enterprise debuginfo support packages. Produces a per-database INFO commandstats report and screens package pairs for counter resets before any before/after comparison.",
   "version": "1.0.0",

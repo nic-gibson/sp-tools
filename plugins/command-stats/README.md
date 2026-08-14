@@ -1,4 +1,4 @@
-# redis-diagnostics
+# command-stats
 
 Skills for working with Redis Enterprise debuginfo support packages.
 

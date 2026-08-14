@@ -1,4 +1,4 @@
-# redis-support-tools
+# sp-tools
 
 A Claude plugin marketplace holding diagnostic skills for Redis Enterprise
 support packages. Colleagues add the marketplace once and then receive updates by
@@ -7,8 +7,8 @@ refreshing it, rather than being sent a new file each time something changes.
 ## For users: install
 
 ```
-/plugin marketplace add github.com/nic-gibson/redis-support-tools
-/plugin install redis-diagnostics@redis-support-tools
+/plugin marketplace add nic-gibson/sp-tools
+/plugin install command-stats@sp-tools
 ```
 
 If the install summary says `Run /reload-plugins to activate.`, run that.
@@ -24,13 +24,13 @@ Then just ask for what you want — the skill triggers on its own:
 To invoke it explicitly, plugin skills are namespaced by plugin name:
 
 ```
-/redis-diagnostics:redis-commandstats-report
+/command-stats:redis-commandstats-report
 ```
 
 ### Getting updates
 
 ```
-/plugin marketplace update redis-support-tools
+/plugin marketplace update sp-tools
 ```
 
 Updates are gated on the `version` field, so a user only receives a change once
@@ -46,7 +46,7 @@ offered and only one of them will receive updates.
 
 | Plugin | Skill | What it does |
 | --- | --- | --- |
-| `redis-diagnostics` | `redis-commandstats-report` | Builds a Redis-branded HTML report of `INFO commandstats` for one named database in a debuginfo package, and screens package pairs for counter resets |
+| `command-stats` | `redis-commandstats-report` | Builds a Redis-branded HTML report of `INFO commandstats` for one named database in a debuginfo package, and screens package pairs for counter resets |
 
 Two scripts are the entry points, and the skill drives them:
 
@@ -69,11 +69,11 @@ Requires `pandas`, `numpy` and `matplotlib`.
 ### Layout
 
 ```
-redis-support-tools/
+sp-tools/
 ├── .claude-plugin/
 │   └── marketplace.json          the catalogue: name, owner, plugin list
 ├── plugins/
-│   └── redis-diagnostics/
+│   └── command-stats/
 │       ├── .claude-plugin/
 │       │   └── plugin.json        the plugin manifest
 │       └── skills/
@@ -91,33 +91,30 @@ the highest-leverage text in the repo.
 
 Plugin `source` paths in `marketplace.json` resolve from the marketplace root
 (the directory containing `.claude-plugin/`), not from inside it. `metadata.pluginRoot`
-is set to `./plugins` so entries could also be written as `"source": "redis-diagnostics"`.
+is set to `./plugins` so entries could also be written as `"source": "command-stats"`.
 
 ### First-time setup
 
-Replace `REPLACE-ME` in `plugin.json` and this README with the real org or user,
-then:
-
 ```bash
-cd redis-support-tools
+cd sp-tools
 git init -b main
 git add -A
-git commit -m "redis-diagnostics 1.0.0"
-git remote add origin git@github.com:REPLACE-ME/redis-support-tools.git
+git commit -m "sp-tools 1.0.0"
+git remote add origin git@github.com:nic-gibson/sp-tools.git
 git push -u origin main
 ```
 
 Test locally before pushing — a local directory works as a marketplace source:
 
 ```
-/plugin marketplace add ./redis-support-tools
-/plugin install redis-diagnostics@redis-support-tools
+/plugin marketplace add ./sp-tools
+/plugin install command-stats@sp-tools
 ```
 
 Validate the manifests with:
 
 ```bash
-claude plugin validate ./plugins/redis-diagnostics
+claude plugin validate ./plugins/command-stats
 ```
 
 ### Releasing a change
@@ -125,15 +122,15 @@ claude plugin validate ./plugins/redis-diagnostics
 Users are pinned to the `version` string, so a push alone changes nothing for
 them. Bump the version in **both** places — they must agree:
 
-- `plugins/redis-diagnostics/.claude-plugin/plugin.json`
-- the `redis-diagnostics` entry in `.claude-plugin/marketplace.json`
+- `plugins/command-stats/.claude-plugin/plugin.json`
+- the `command-stats` entry in `.claude-plugin/marketplace.json`
 
 Then commit, push, and tell colleagues to run
-`/plugin marketplace update redis-support-tools`.
+`/plugin marketplace update sp-tools`.
 
 ### Adding another skill
 
-Drop a new directory under `plugins/redis-diagnostics/skills/`, with its own
+Drop a new directory under `plugins/command-stats/skills/`, with its own
 `SKILL.md`, and bump the plugin version. Nothing else needs editing — the
 marketplace entry doesn't enumerate skills.
 
