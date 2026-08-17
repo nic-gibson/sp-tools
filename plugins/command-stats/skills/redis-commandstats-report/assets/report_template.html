@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Redis commandstats — single-snapshot analysis</title>
+<!--
+  Template for extract.py. The report model is injected into the placeholder
+  span on the "const DATA" line below; opened without injection this file
+  renders a placeholder rather than an error. Do not repeat the placeholder
+  markers anywhere else in this file -- the injector matches the first one.
+
+  Self-contained by requirement: no webfonts, no CDN, no network. The Space
+  Grotesk / Space Mono pairing is declared first in case it is installed
+  locally, with system faces behind it -- unlike the matplotlib path there is no
+  font-metric guesswork here, because the browser lays out the real text it has.
+
+  Figures are hand-rolled SVG rather than a chart library: it keeps the file
+  dependency-free, and it prints and exports to PDF cleanly, which canvas does
+  not. The two figures a chart library would not have drawn anyway -- the
+  percentile dumbbell and the shard heatmap -- cost no more here than the bars.
+-->
+<style>
+/* Design tokens from Redis's own theme config (redis/docs tailwind.config.js):
+   redis-red-500 #FF4438 · redis-pen-800 "Dusk" #163341 · redis-ink-900 #091A23
+   redis-yellow-500 #DCFF1E · redis-indigo-500 #5961FF · redis-pen grey ramp
+   Type: Space Grotesk (sans) / Space Mono (mono).
+   Note: aggregator sites still publish Redis's pre-2024 palette (Poppy #D82C20
+   and friends); those values are stale and are not used here. */
+:root{
+  color-scheme:light;
+  --red:#FF4438; --red-600:#D52D1F; --yellow:#DCFF1E; --yellow-100:#FBFFE8;
+  --indigo:#5961FF; --pen-200:#E8EBEC; --pen-300:#B9C2C6; --pen-400:#8A99A0;
+  --pen-600:#5C707A; --pen-700:#2D4754; --pen-800:#163341; --pen-900:#8A221C;
+  --ink:#091A23; --neutral-200:#F9F9F9; --white:#FFF;
+  --surface:var(--white); --plane:var(--neutral-200);
+  --ink2:var(--pen-700); --muted:var(--pen-600);
+  --grid:var(--pen-200); --axis:var(--pen-300);
+  --sans:"Space Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"Space Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--surface)}
+body{margin:0;background:var(--surface);color:var(--ink);
+font:15px/1.62 var(--sans);-webkit-font-smoothing:antialiased;font-variant-ligatures:none}
+.masthead{background:var(--pen-800);color:var(--white);padding:40px 0 0}
+.masthead .inner{max-width:1180px;margin:0 auto;padding:0 30px 32px}
+.brandline{display:flex;align-items:center;gap:11px;margin-bottom:24px}
+.mark{width:26px;height:26px;flex:none}
+.brandname{font-weight:700;font-size:15px;letter-spacing:.02em;color:var(--white)}
+.brandname span{color:var(--pen-400);font-weight:400;margin-left:9px;letter-spacing:0}
+h1{font-size:32px;line-height:1.16;margin:0 0 13px;letter-spacing:-.018em;font-weight:700;color:var(--white)}
+.masthead .sub{color:var(--pen-300);font-size:15.5px;margin:0;max-width:78ch}
+.masthead .sub b{color:var(--white);font-weight:500}
+.masthead .meta{color:var(--pen-400);font-size:12.5px;margin-top:18px;font-variant-numeric:tabular-nums}
+.masthead .meta b{color:var(--yellow);font-weight:500}
+.masthead code{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.16);color:var(--pen-200)}
+.redrule{height:4px;background:var(--red)}
+.wrap{max-width:1180px;margin:0 auto;padding:38px 30px 96px}
+nav{margin:0 0 48px;padding:20px 22px;background:var(--plane);border:1px solid var(--grid);
+border-left:3px solid var(--red);border-radius:0 4px 4px 0;display:grid;
+grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:5px 24px}
+nav a{color:var(--ink2);text-decoration:none;font-size:13px;padding:2px 0;
+border-bottom:1px solid transparent;transition:.2s all}
+nav a:hover{color:var(--red);border-bottom-color:var(--red)}
+section{margin:0 0 60px;scroll-margin-top:18px}
+h2{font-size:21.5px;margin:0 0 13px;padding-bottom:10px;letter-spacing:-.012em;font-weight:700;
+border-bottom:1px solid var(--grid);position:relative}
+h2::after{content:"";position:absolute;left:0;bottom:-1px;width:54px;height:2px;background:var(--red)}
+.num{display:inline-block;min-width:31px;color:var(--red-600);font-variant-numeric:tabular-nums;font-weight:500}
+p{margin:0 0 15px}
+.lead{color:var(--ink2);font-size:14.5px;margin-bottom:22px;max-width:96ch}
+figure{margin:22px 0 14px}
+figure svg{display:block;width:100%;height:auto}
+code{font:12.4px var(--mono);background:var(--plane);border:1px solid var(--grid);
+border-radius:3px;padding:1px 4px;color:var(--pen-700)}
+b,strong{font-weight:600}
+a{color:var(--red-600)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(212px,1fr));gap:13px;margin:20px 0 24px}
+.tile{background:var(--plane);border:1px solid var(--grid);border-top:3px solid var(--pen-800);
+border-radius:0 0 4px 4px;padding:15px 17px}
+.tile:first-child{border-top-color:var(--red)}
+.tl{font-size:11.5px;color:var(--muted);margin-bottom:8px;letter-spacing:.015em;text-transform:uppercase}
+.tv{font-size:27px;font-weight:700;letter-spacing:-.028em;font-variant-numeric:tabular-nums;line-height:1.1;
+overflow-wrap:anywhere}
+.tv .u{font-size:15px;font-weight:400;color:var(--muted);margin-left:2px;letter-spacing:0}
+.tn{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+.tblwrap{margin:18px 0 24px}
+.cap{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+color:var(--muted);font-size:12px;padding-bottom:8px}
+.cap .hint{color:var(--pen-400);font-size:11px;white-space:nowrap}
+button.csv{font:11px var(--sans);color:var(--ink2);background:var(--plane);
+border:1px solid var(--grid);border-radius:3px;padding:3px 9px;cursor:pointer;white-space:nowrap}
+button.csv:hover{border-color:var(--red);color:var(--red-600)}
+.scroll{overflow-x:auto;border-bottom:1px solid var(--grid)}
+table{border-collapse:collapse;width:100%;font-size:12.6px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 11px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--grid)}
+thead th{border-bottom:2px solid var(--pen-800);color:var(--pen-800);font-weight:700;
+font-size:11.5px;letter-spacing:.012em;position:sticky;top:0;background:var(--surface);
+cursor:pointer;user-select:none}
+thead th:hover{color:var(--red-600)}
+thead th::after{content:"";display:inline-block;width:0;margin-left:5px}
+thead th.asc::after{content:"▲";font-size:8px}
+thead th.desc::after{content:"▼";font-size:8px}
+thead th:first-child,th.rh,td.l{text-align:left}
+th.rh{font-weight:400;color:var(--ink);font-family:var(--mono);font-size:11.8px}
+tbody tr:hover{background:var(--yellow-100)}
+td.heat{font-family:var(--mono);font-size:10.5px;text-align:center;padding:5px 8px}
+.warn{background:var(--yellow-100);border-left:3px solid var(--yellow);padding:14px 18px;
+border-radius:0 4px 4px 0;font-size:13.8px;margin:22px 0}
+.find{background:#FFF4F3;border-left:3px solid var(--red);padding:14px 18px;
+border-radius:0 4px 4px 0;font-size:13.8px;margin:22px 0}
+ul{margin:0 0 16px;padding-left:21px}
+li{margin-bottom:11px}
+li::marker{color:var(--red)}
+footer{margin-top:66px;padding-top:22px;border-top:2px solid var(--pen-800);
+color:var(--muted);font-size:12px}
+.pill{display:inline-block;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;
+padding:2px 7px;border-radius:2px;font-weight:700}
+.pill.pass{background:#EAF6EE;color:#1D6B3A}
+.pill.fail{background:#FFF4F3;color:var(--red-600)}
+.pill.na{background:var(--plane);color:var(--muted)}
+@media print{
+  nav,button.csv{display:none}
+  section{break-inside:avoid}
+  .masthead{background:none;color:var(--ink);padding-top:0}
+  h1,.masthead .sub b{color:var(--ink)}
+  .masthead .sub,.masthead .meta{color:var(--pen-700)}
+  .masthead .meta b{color:var(--ink)}
+  .masthead code{background:var(--plane);border-color:var(--grid);color:var(--pen-700)}
+  .scroll{overflow:visible}
+}
+</style>
+</head>
+<body>
+<div id="report"></div>
+<script>
+"use strict";
+
+/* ==================================================================== data */
+const DATA = /*__DATA__*/ null /*__END_DATA__*/;
+
+/* Findings prose. extract.py fills this from its deterministic derivation; a
+   caller may replace the array to write their own. The thresholds that decide
+   *whether* a finding applies live in extract.py and are not overridable --
+   only the wording is. */
+let FINDINGS = null;
+
+/* ============================================================== formatting */
+const DASH = "—";
+const nf = (v, d) => v.toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const isNum = v => typeof v === "number" && isFinite(v);
+const f = d => v => isNum(v) ? nf(v, d) : DASH;
+const f0 = f(0), f1 = f(1), f2 = f(2), f3 = f(3);
+const pct = d => v => isNum(v) ? nf(v, d) + "%" : DASH;
+const int = v => isNum(v) ? nf(Math.round(v), 0) : DASH;
+
+function si(v) {
+  if (!isNum(v)) return DASH;
+  const a = Math.abs(v);
+  for (const [d, s] of [[1e9, "B"], [1e6, "M"], [1e3, "k"]]) {
+    if (a >= d) return trim(nf(v / d, 2)) + s;
+  }
+  return a >= 10 ? nf(v, 0) : trim(nf(v, 2));
+}
+const trim = s => s.replace(/\.?0+$/, "");
+
+function dur(us) {
+  if (!isNum(us)) return DASH;
+  if (us < 1000) return nf(us, 1) + "µs";
+  if (us < 1e6) return nf(us / 1e3, 1) + "ms";
+  return nf(us / 1e6, 2) + "s";
+}
+const hours = s => isNum(s) ? (s / 3600 < 48 ? nf(s / 3600, 1) + "h" : nf(s / 86400, 1) + "d") : DASH;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
+/* ================================================================ palette */
+/* Dusk leads so Redis Red stays available for emphasis and polarity rather than
+   becoming the default series colour. Every entry clears 3:1 on white. */
+const C = {
+  surface: "#FFFFFF", plane: "#F9F9F9", ink: "#091A23", ink2: "#2D4754",
+  muted: "#5C707A", grid: "#E8EBEC", axis: "#B9C2C6", deemph: "#B9C2C6",
+  red: "#FF4438", red2: "#D52D1F", dusk: "#163341", indigo: "#5961FF",
+  cat: ["#163341", "#FF4438", "#5961FF", "#5C707A", "#8A221C", "#2D4754", "#D52D1F", "#8A99A0"],
+  ramp: ["#FFFFFF", "#E8EBEC", "#8A99A0", "#2D4754", "#091A23"]
+};
+
+function mixHex(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+function rampAt(t) {
+  t = Math.max(0, Math.min(1, t));
+  const n = C.ramp.length - 1, i = Math.min(n - 1, Math.floor(t * n));
+  return mixHex(C.ramp[i], C.ramp[i + 1], t * n - i);
+}
+/* Ink or white on `hx`, whichever has more contrast (WCAG relative luminance). */
+function onColor(hx) {
+  const c = [1, 3, 5].map(i => parseInt(hx.slice(i, i + 2), 16) / 255)
+    .map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const L = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.0614) ? "#FFFFFF" : C.ink;
+}
+
+/* ============================================================== svg helpers */
+const NS = "http://www.w3.org/2000/svg";
+function E(tag, a, kids) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in (a || {})) if (a[k] !== null && a[k] !== undefined) n.setAttribute(k, a[k]);
+  if (typeof kids === "string") n.textContent = kids;
+  else if (Array.isArray(kids)) kids.forEach(c => c && n.appendChild(c));
+  return n;
+}
+function TX(x, y, s, o) {
+  o = o || {};
+  return E("text", {
+    x: x, y: y, "font-size": o.size || 8.6, fill: o.fill || C.ink2,
+    "text-anchor": o.anchor || "start", "dominant-baseline": o.base || "middle",
+    "font-weight": o.weight || null,
+    "font-family": o.mono ? "var(--mono)" : null,
+    transform: o.rot ? "rotate(" + o.rot + " " + x + " " + y + ")" : null
+  }, String(s));
+}
+/* Rough advance width. Only used to reserve gutters, and it over-reserves
+   slightly for narrow faces, which is the safe direction. */
+const tw = (s, size) => String(s).length * (size || 8.6) * 0.56;
+
+function scale(d0, d1, r0, r1, log) {
+  let fn;
+  if (log) {
+    d0 = Math.max(d0, 1e-12);
+    if (!(d1 > d0)) d1 = d0 * 10;
+    const a = Math.log10(d0), b = Math.log10(d1);
+    fn = v => r0 + (Math.log10(Math.max(v, d0)) - a) / (b - a) * (r1 - r0);
+  } else {
+    const span = (d1 - d0) || 1;
+    fn = v => r0 + (v - d0) / span * (r1 - r0);
+  }
+  fn.d = [d0, d1]; fn.r = [r0, r1]; fn.log = !!log;
+  return fn;
+}
+function ticksOf(s, n) {
+  const out = [];
+  if (s.log) {
+    const lo = Math.floor(Math.log10(s.d[0])), hi = Math.ceil(Math.log10(s.d[1]));
+    const dec = hi - lo, mult = dec <= 2 ? [1, 2, 5] : (dec <= 5 ? [1, 3] : [1]);
+    for (let e = lo; e <= hi; e++) for (const m of mult) {
+      const v = m * Math.pow(10, e);
+      if (v >= s.d[0] * 0.9999 && v <= s.d[1] * 1.0001) out.push(v);
+    }
+    return out;
+  }
+  const raw = (s.d[1] - s.d[0]) / (n || 6);
+  if (!(raw > 0)) return [s.d[0]];
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = ([1, 2, 2.5, 5, 10].find(m => m * mag >= raw) || 10) * mag;
+  for (let v = Math.ceil(s.d[0] / step) * step; v <= s.d[1] * 1.0001 + 1e-12; v += step) {
+    out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  }
+  return out;
+}
+
+/* A figure frame: headline and subtitle above, source note below, one or more
+   plot panels between. Every label is derived from the data, so the same code
+   describes a 4-shard database and a 200-shard one correctly. */
+function figure(o) {
+  const W = o.w || 1120, hasHead = !!o.head, top = hasHead ? (o.sub ? 46 : 28) : 6;
+  const bot = o.note ? 22 : 6, H = top + o.h + bot;
+  const svg = E("svg", {viewBox: "0 0 " + W + " " + H, width: W, height: H,
+    xmlns: NS, role: "img", "aria-label": (o.head || "") + ". " + (o.sub || "")});
+  svg.appendChild(E("rect", {x: 0, y: 0, width: W, height: H, fill: C.surface}));
+  if (o.head) svg.appendChild(TX(0, 14, o.head, {size: 14.5, weight: 700, fill: C.ink, base: "middle"}));
+  if (o.sub) {
+    wrapText(svg, o.sub, 0, 32, W, 9.2, C.muted);
+  }
+  if (o.note) svg.appendChild(TX(0, H - 7, o.note, {size: 8, fill: C.muted}));
+  const g = E("g", {transform: "translate(0," + top + ")"});
+  svg.appendChild(g);
+  return {svg: svg, g: g, W: W, H: o.h};
+}
+function wrapText(parent, s, x, y, w, size, fill) {
+  const words = String(s).split(/\s+/), lines = [];
+  let cur = "";
+  for (const word of words) {
+    const t = cur ? cur + " " + word : word;
+    if (tw(t, size) > w && cur) { lines.push(cur); cur = word; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  lines.slice(0, 2).forEach((ln, i) => parent.appendChild(TX(x, y + i * (size + 3), ln, {size: size, fill: fill})));
+  return lines.length;
+}
+function panelTitle(g, x, y, head, sub) {
+  g.appendChild(TX(x, y, head, {size: 10.5, weight: 700, fill: C.ink}));
+  if (sub) g.appendChild(TX(x, y + 13, sub, {size: 8.6, fill: C.muted}));
+}
+
+/* Vertical gridlines, tick labels beneath, axis title. */
+function xAxis(g, s, y0, y1, fmt) {
+  const t = ticksOf(s);
+  t.forEach(v => {
+    const x = s(v);
+    g.appendChild(E("line", {x1: x, x2: x, y1: y0, y2: y1, stroke: C.grid, "stroke-width": 0.7}));
+    g.appendChild(TX(x, y1 + 11, fmt(v), {size: 8, anchor: "middle", fill: C.ink2}));
+  });
+  g.appendChild(E("line", {x1: s.r[0], x2: s.r[1], y1: y1, y2: y1, stroke: C.axis, "stroke-width": 0.8}));
+}
+function yAxis(g, s, x0, x1, fmt) {
+  ticksOf(s).forEach(v => {
+    const y = s(v);
+    g.appendChild(E("line", {x1: x0, x2: x1, y1: y, y2: y, stroke: C.grid, "stroke-width": 0.7}));
+    g.appendChild(TX(x0 - 6, y, fmt(v), {size: 8, anchor: "end", fill: C.ink2}));
+  });
+  g.appendChild(E("line", {x1: x0, x2: x0, y1: s.r[1], y2: s.r[0], stroke: C.axis, "stroke-width": 0.8}));
+}
+function axisLabel(g, x, y, s) {
+  g.appendChild(TX(x, y, s, {size: 8.8, anchor: "middle", fill: C.ink2}));
+}
+const ROWH = 17;
+
+/* Ranked horizontal bars, largest at the top. */
+function barPanel(g, o) {
+  const items = o.items, n = items.length;
+  const gut = o.gutter !== undefined ? o.gutter :
+    Math.min(190, Math.max(46, Math.max.apply(null, items.map(d => tw(d.k, 8.4))) + 8));
+  const x0 = o.x + gut, x1 = o.x + o.w - (o.pad !== undefined ? o.pad : 52);
+  const yTop = o.y + (o.head ? (o.sub ? 26 : 16) : 0);
+  const plotH = n * ROWH;
+  const vmax = Math.max.apply(null, items.map(d => d.v || 0));
+  const posMin = Math.min.apply(null, items.filter(d => d.v > 0).map(d => d.v).concat([vmax || 1]));
+  const s = o.log
+    ? scale(Math.max(posMin * 0.5, vmax * 1e-9, 1e-12), vmax * 3.2, x0, x1, true)
+    : scale(0, (vmax || 1) * 1.16, x0, x1, false);
+  if (o.head) panelTitle(g, o.x, o.y + 4, o.head, o.sub);
+  xAxis(g, s, yTop, yTop + plotH, o.tick || (o.log ? si : f0));
+  const base = o.log ? s.d[0] : 0;
+  items.forEach((d, i) => {
+    const y = yTop + i * ROWH + ROWH / 2;
+    const v = isNum(d.v) ? d.v : 0;
+    const xw = Math.max(0.6, s(Math.max(v, base * 1.0001)) - x0);
+    g.appendChild(E("rect", {x: x0, y: y - 5.4, width: xw, height: 10.8,
+      fill: d.c || o.color || C.cat[0]}));
+    g.appendChild(TX(x0 - 6, y, d.k, {size: 8.4, anchor: "end", mono: true, fill: C.ink}));
+    if (i < (o.labelTop === undefined ? n : o.labelTop)) {
+      g.appendChild(TX(x0 + xw + 5, y, (o.fmt || si)(d.v), {size: 7.9, fill: C.muted}));
+    }
+  });
+  axisLabel(g, (x0 + x1) / 2, yTop + plotH + 27, o.xlabel);
+  return yTop + plotH + 34;
+}
+const panelH = (n, head, sub) => n * ROWH + 34 + (head ? (sub ? 26 : 16) : 0);
+
+/* Grouped horizontal bars: one row per category, one bar per series. */
+function groupPanel(g, o) {
+  const rows = o.rows, series = o.series, ns = series.length;
+  const rh = Math.max(15, ns * 9 + 8);
+  const gut = Math.min(210, Math.max(46, Math.max.apply(null, rows.map(r => tw(r.k, 8.4))) + 8));
+  const x0 = o.x + gut, x1 = o.x + o.w - (o.pad !== undefined ? o.pad : 58);
+  const yTop = o.y, plotH = rows.length * rh;
+  let vmax = 0, posMin = Infinity;
+  rows.forEach(r => r.v.forEach(v => {
+    if (isNum(v)) { vmax = Math.max(vmax, v); if (v > 0) posMin = Math.min(posMin, v); }
+  }));
+  if (!isFinite(posMin)) posMin = 1e-4;
+  const s = o.log ? scale(Math.max(posMin * 0.5, 1e-9), vmax * 5, x0, x1, true)
+                  : scale(0, (vmax || 1) * 1.14, x0, x1, false);
+  xAxis(g, s, yTop, yTop + plotH, o.tick || (o.log ? si : f0));
+  const bh = Math.min(8, (rh - 5) / ns);
+  rows.forEach((r, i) => {
+    const yc = yTop + i * rh + rh / 2;
+    g.appendChild(TX(x0 - 6, yc, r.k, {size: 8.4, anchor: "end", mono: true, fill: C.ink}));
+    r.v.forEach((v, j) => {
+      const y = yc + (j - (ns - 1) / 2) * (bh + 1.4);
+      const vv = isNum(v) ? v : 0;
+      const xw = Math.max(0.6, s(Math.max(vv, o.log ? s.d[0] * 1.0001 : 0)) - x0);
+      g.appendChild(E("rect", {x: x0, y: y - bh / 2, width: xw, height: bh, fill: series[j].c}));
+      if (o.labelMin !== undefined && vv >= o.labelMin) {
+        g.appendChild(TX(x0 + xw + 4, y, (o.fmt || si)(vv), {size: 7.4, fill: C.muted}));
+      }
+    });
+  });
+  legend(g, x1, yTop + plotH + 26, series, "end");
+  axisLabel(g, (x0 + x1) / 2, yTop + plotH + 26, o.xlabel);
+  return yTop + plotH + 34;
+}
+function legend(g, x, y, series, anchor) {
+  let cx = x;
+  const items = anchor === "end" ? series.slice().reverse() : series;
+  items.forEach(sr => {
+    const w = tw(sr.name, 8.4) + 22;
+    const bx = anchor === "end" ? cx - w : cx;
+    g.appendChild(E("rect", {x: bx, y: y - 4, width: 9, height: 9, fill: sr.c}));
+    g.appendChild(TX(bx + 13, y + 0.5, sr.name, {size: 8.4, fill: C.ink2}));
+    cx = anchor === "end" ? cx - w : cx + w;
+  });
+}
+
+/* ==================================================================== model */
+const M = DATA;
+const PC = M ? M.per_cmd : [], PS = M ? M.per_shard : [];
+const T = M ? M.totals : {}, CN = M ? M.conc : {};
+const NSH = M ? M.totals.n_shards : 0;
+const shWord = n => n + " shard" + (n === 1 ? "" : "s");
+const byDesc = (arr, k) => arr.slice().filter(d => isNum(d[k])).sort((a, b) => b[k] - a[k]);
+const topN = (k, n) => byDesc(PC, k).slice(0, n);
+const hasLat = () => PC.some(d => isNum(d.p99_med));
+
+/* =================================================================== figures */
+function figWindows() {
+  const n = PS.length, h = panelH(n, true, true);
+  const fg = figure({
+    h: h,
+    head: "Why rates are required, not optional",
+    sub: "Uptimes span " + hours(T.uptime_min) + " to " + hours(T.uptime_max) + " (" +
+      f1(T.uptime_spread) + "× spread), so raw counters are not comparable shard to " +
+      "shard; dividing by uptime removes the distortion.",
+    note: "Source: INFO Server uptime_in_seconds and INFO Commandstats, " +
+      shWord(NSH) + " (" + M.role_filter + ")."
+  });
+  const half = fg.W / 2 - 12;
+  barPanel(fg.g, {
+    x: 0, y: 0, w: half, items: byDesc(PS, "uptime_s").map(s => ({k: "redis:" + s.shard, v: s.uptime_h})),
+    color: C.cat[0], xlabel: "uptime at capture (hours)", fmt: v => f0(v) + "h", tick: f0,
+    head: "Counter window per shard", sub: "each shard's counters cover only its own uptime"
+  });
+  barPanel(fg.g, {
+    x: fg.W / 2 + 12, y: 0, w: half, items: byDesc(PS, "rate").map(s => ({k: "redis:" + s.shard, v: s.rate})),
+    color: C.cat[3], xlabel: "lifetime mean calls/sec", fmt: f0, tick: si,
+    head: "Throughput per shard", sub: "counts ÷ uptime — comparable across shards"
+  });
+  return fg.svg;
+}
+
+function figCohorts() {
+  const order = M.cohort_order, idx = {};
+  M.cohort_commands.forEach((c, i) => idx[c] = i);
+  const tot = M.cohort_commands.map(c => ({
+    k: c, v: order.reduce((a, o) => a + (M.cohort_values[o][idx[c]] || 0), 0)
+  })).sort((a, b) => b.v - a.v).slice(0, 16);
+  const rows = tot.map(d => ({k: d.k, v: order.map(o => M.cohort_values[o][idx[d.k]] || 0)}));
+  const series = order.map((o, i) => ({name: o, c: C.cat[i % C.cat.length]}));
+  const rh = Math.max(15, order.length * 9 + 8);
+  const fg = figure({
+    h: rows.length * rh + 40,
+    head: "The same database across " + T.n_cohorts + " different measurement windows",
+    sub: "Shards grouped by uptime — shards that restarted together share a window, " +
+      "so the groups fall out of the gaps in the uptime list.",
+    note: "Rates are per-shard means so cohorts of unequal size compare fairly. " +
+      "Bars at the axis floor are effectively zero."
+  });
+  groupPanel(fg.g, {x: 0, y: 0, w: fg.W, rows: rows, series: series, log: true,
+    xlabel: "calls/sec per shard, within the cohort (log)"});
+  return fg.svg;
+}
+
+function figMix() {
+  const n = Math.min(20, PC.length);
+  const h = panelH(n, true, true);
+  const fg = figure({
+    h: h,
+    head: "What the database runs, and what it spends its time on",
+    sub: "Rate-normalised so every shard's contribution covers a comparable window. " +
+      "Log scale, ranked independently per panel.",
+    note: "1 milli-core = 0.1% of one CPU core, summed across " + shWord(NSH) + "."
+  });
+  const half = fg.W / 2 - 12;
+  barPanel(fg.g, {x: 0, y: 0, w: half, log: true, color: C.cat[0],
+    items: topN("rate", n).map(d => ({k: d.command, v: d.rate})),
+    xlabel: "calls/sec (log)", fmt: si, labelTop: 8,
+    head: "Throughput", sub: "top " + n + " of " + T.n_commands + " commands"});
+  barPanel(fg.g, {x: fg.W / 2 + 12, y: 0, w: half, log: true, color: C.red,
+    items: topN("cpu_frac", n).map(d => ({k: d.command, v: d.cpu_frac * 1000})),
+    xlabel: "CPU milli-cores (log)", fmt: v => f2(v) + "m", tick: si, labelTop: 8,
+    head: "CPU cost", sub: "top " + n + " by CPU time ÷ uptime"});
+  return fg.svg;
+}
+
+function figShares() {
+  const n = Math.min(18, PC.length), top = topN("rate", n);
+  const rows = top.map(d => ({k: d.command, v: [d.rate_share * 100, d.cpu_share * 100]}));
+  const fg = figure({
+    h: rows.length * 20 + 40,
+    head: "Call share vs CPU share — the commands you run most are not the ones you pay for",
+    sub: "Both are uptime-invariant, so they are valid on a single capture. Top " + n +
+      " commands by call share."
+  });
+  groupPanel(fg.g, {x: 0, y: 0, w: fg.W, rows: rows, labelMin: 1.2,
+    series: [{name: "share of calls", c: C.cat[0]}, {name: "share of CPU time", c: C.red}],
+    xlabel: "% of database total", fmt: v => f1(v) + "%", tick: v => f0(v) + "%"});
+  return fg.svg;
+}
+
+function figConcentration() {
+  const s = byDesc(PC, "rate").map(d => d.rate).filter(v => v > 0);
+  const fg = figure({
+    h: 300, head: "How concentrated is the workload?",
+    sub: "Rate-normalised call counts across " + shWord(NSH) + "."
+  });
+  const half = fg.W / 2 - 30, x0 = 46, y0 = 24, ph = 210;
+  // rank-frequency, log-log
+  let sx = scale(1, s.length * 1.1, x0, x0 + half, true);
+  let sy = scale(Math.min.apply(null, s) * 0.6, Math.max.apply(null, s) * 1.8, y0 + ph, y0, true);
+  xAxis(fg.g, sx, y0, y0 + ph, f0);
+  yAxis(fg.g, sy, x0, x0 + half, si);
+  fg.g.appendChild(E("polyline", {
+    points: s.map((v, i) => sx(i + 1) + "," + sy(v)).join(" "),
+    fill: "none", stroke: C.cat[0], "stroke-width": 1.6
+  }));
+  s.forEach((v, i) => fg.g.appendChild(E("circle", {cx: sx(i + 1), cy: sy(v), r: 2.1, fill: C.cat[0]})));
+  panelTitle(fg.g, 0, 8, "Rank–frequency", null);
+  axisLabel(fg.g, x0 + half / 2, y0 + ph + 27, "command rank (log)");
+  fg.g.appendChild(TX(0, y0 + ph / 2, "calls/sec (log)", {size: 8.8, anchor: "middle", rot: -90}));
+  // cumulative
+  const bx = fg.W / 2 + 30;
+  const tot = s.reduce((a, b) => a + b, 0);
+  let run = 0;
+  const cum = s.map(v => { run += v; return run / tot * 100; });
+  sx = scale(1, s.length * 1.1, bx, bx + half, true);
+  sy = scale(0, 104, y0 + ph, y0, false);
+  xAxis(fg.g, sx, y0, y0 + ph, f0);
+  yAxis(fg.g, sy, bx, bx + half, v => f0(v) + "%");
+  [[50, "n_for_50"], [90, "n_for_90"], [99, "n_for_99"]].forEach(([lvl, key]) => {
+    fg.g.appendChild(E("line", {x1: bx, x2: bx + half, y1: sy(lvl), y2: sy(lvl),
+      stroke: C.axis, "stroke-width": 0.8, "stroke-dasharray": "4 3"}));
+    fg.g.appendChild(TX(bx + 6, sy(lvl) - 7, lvl + "% of calls = top " + CN[key] + " commands",
+      {size: 8, fill: C.muted}));
+  });
+  fg.g.appendChild(E("polyline", {points: cum.map((v, i) => sx(i + 1) + "," + sy(v)).join(" "),
+    fill: "none", stroke: C.cat[0], "stroke-width": 1.8}));
+  panelTitle(fg.g, bx - 46, 8, "Cumulative concentration", null);
+  axisLabel(fg.g, bx + half / 2, y0 + ph + 27, "command rank (log)");
+  return fg.svg;
+}
+
+function magBins(vals) {
+  const v = vals.filter(x => isNum(x) && x > 0);
+  if (!v.length) return {labels: [], counts: []};
+  const lo = Math.floor(Math.log10(Math.min.apply(null, v)));
+  const hi = Math.ceil(Math.log10(Math.max.apply(null, v)));
+  const labels = [], counts = [];
+  for (let e = lo; e < Math.max(hi, lo + 1); e++) {
+    const a = Math.pow(10, e), b = Math.pow(10, e + 1);
+    labels.push("10^" + e + "–10^" + (e + 1));
+    counts.push(v.filter(x => x >= a && x < b).length);
+  }
+  return {labels: labels, counts: counts};
+}
+function figBins() {
+  const A = magBins(PC.map(d => d.rate)), B = magBins(PC.map(d => d.avg_us));
+  const fg = figure({h: 250, head: "Distribution over magnitude bins",
+    sub: "The literal histogram: commands binned by order of magnitude."});
+  const half = fg.W / 2 - 30;
+  [[A, 46, "calls/sec (log bins)", C.cat[0], "By throughput", "how many commands are hot, warm, rare"],
+   [B, fg.W / 2 + 30, "mean µs per call (log bins)", C.red, "By cost per call",
+    "the latency profile of the command set"]].forEach(([D, x0, xl, col, hd, sb]) => {
+    const y0 = 30, ph = 165, w = half;
+    const mx = Math.max.apply(null, D.counts.concat([1]));
+    const sy = scale(0, mx * 1.22, y0 + ph, y0, false);
+    yAxis(fg.g, sy, x0, x0 + w, f0);
+    const bw = w / Math.max(D.counts.length, 1);
+    D.counts.forEach((c, i) => {
+      const cx = x0 + i * bw + bw / 2;
+      fg.g.appendChild(E("rect", {x: cx - bw * 0.33, y: sy(c), width: bw * 0.66,
+        height: Math.max(0, sy(0) - sy(c)), fill: col}));
+      if (c) fg.g.appendChild(TX(cx, sy(c) - 7, String(c), {size: 8, anchor: "middle", fill: C.ink2}));
+      fg.g.appendChild(TX(cx, y0 + ph + 11, D.labels[i], {size: 7.6, anchor: "middle", fill: C.ink2}));
+    });
+    panelTitle(fg.g, x0 - 46, 8, hd, sb);
+    axisLabel(fg.g, x0 + w / 2, y0 + ph + 28, xl);
+    fg.g.appendChild(TX(x0 - 34, y0 + ph / 2, "number of commands",
+      {size: 8.8, anchor: "middle", rot: -90}));
+  });
+  return fg.svg;
+}
+
+function figPartToWhole() {
+  const k = Math.min(6, Math.max(1, PC.length - 1));
+  const fg = figure({h: 150, head: "Part-to-whole: what the workload is made of",
+    sub: "Top " + k + " commands plus a folded tail. Calls above, CPU time below."});
+  [["rate_share", "share of calls", 14], ["cpu_share", "share of CPU time", 82]]
+    .forEach(([key, lbl, y]) => {
+      const top = topN(key, k);
+      const vals = top.map(d => d[key] * 100);
+      const rest = Math.max(0, 100 - vals.reduce((a, b) => a + b, 0));
+      const names = top.map(d => d.command).concat(["Other (folded tail)"]);
+      const fills = top.map((_, i) => C.cat[i % C.cat.length]).concat([C.deemph]);
+      const all = vals.concat([rest]);
+      const s = scale(0, 100, 0, fg.W, false);
+      let left = 0;
+      all.forEach((v, i) => {
+        const w = Math.max(0, s(v) - s(0) - 1.6);
+        fg.g.appendChild(E("rect", {x: s(left), y: y, width: w, height: 30, fill: fills[i]}));
+        if (v >= 5) {
+          const cx = s(left) + w / 2, col = onColor(fills[i]);
+          fg.g.appendChild(TX(cx, y + 10, names[i], {size: 7.6, anchor: "middle", fill: col, weight: 700}));
+          fg.g.appendChild(TX(cx, y + 21, f0(v) + "%", {size: 7.6, anchor: "middle", fill: col}));
+        }
+        left += v;
+      });
+      fg.g.appendChild(TX(0, y + 42, "% of database total — " + lbl, {size: 8.6, fill: C.ink2}));
+    });
+  return fg.svg;
+}
+
+function figPercentiles() {
+  const g0 = PC.filter(d => isNum(d.p50_med) && isNum(d.p99_med));
+  if (!g0.length) return null;
+  const n = Math.min(20, g0.length);
+  const rows = byDesc(g0, "cpu_frac").slice(0, n).sort((a, b) => b.p99_med - a.p99_med);
+  const fg = figure({
+    h: rows.length * ROWH + 62,
+    head: "Real percentiles from INFO Latencystats",
+    sub: "Top " + n + " commands by CPU cost. Percentiles are per-shard and cannot be summed, " +
+      "so the median across " + shWord(NSH) + " is shown.",
+    note: "Diamond = usec/calls from Commandstats. The gap between it and p50 is the " +
+      "distribution's skew."
+  });
+  const half = fg.W / 2 - 12;
+  const gut = Math.min(190, Math.max(46, Math.max.apply(null, rows.map(d => tw(d.command, 8.4))) + 8));
+  const x0 = gut, x1 = half - 6, y0 = 20, ph = rows.length * ROWH;
+  let lo = Infinity, hi = 0;
+  rows.forEach(d => [d.p50_med, d.p99_med, d.p999_med, d.avg_us].forEach(v => {
+    if (isNum(v) && v > 0) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  }));
+  const s = scale(lo * 0.6, hi * 1.8, x0, x1, true);
+  xAxis(fg.g, s, y0, y0 + ph, dur);
+  panelTitle(fg.g, 0, 4, "Mean vs the actual distribution", "what commandstats alone cannot show");
+  rows.forEach((d, i) => {
+    const y = y0 + i * ROWH + ROWH / 2;
+    fg.g.appendChild(TX(x0 - 6, y, d.command, {size: 8.4, anchor: "end", mono: true, fill: C.ink}));
+    if (isNum(d.p999_med)) {
+      fg.g.appendChild(E("line", {x1: s(d.p50_med), x2: s(d.p999_med), y1: y, y2: y,
+        stroke: C.axis, "stroke-width": 1.3}));
+    }
+    [["p50_med", C.cat[5]], ["p99_med", C.cat[3]], ["p999_med", C.cat[0]]].forEach(([k, col]) => {
+      if (isNum(d[k])) fg.g.appendChild(E("circle", {cx: s(d[k]), cy: y, r: 4.2, fill: col,
+        stroke: C.surface, "stroke-width": 1.4}));
+    });
+    if (isNum(d.avg_us) && d.avg_us > 0) {
+      const x = s(d.avg_us);
+      fg.g.appendChild(E("polygon", {points: [[x, y - 4.4], [x + 4.4, y], [x, y + 4.4], [x - 4.4, y]]
+        .map(p => p.join(",")).join(" "), fill: C.red, stroke: C.surface, "stroke-width": 1.3}));
+    }
+  });
+  axisLabel(fg.g, (x0 + x1) / 2, y0 + ph + 27, "time per call (log) — median across shards");
+  legend(fg.g, x1, y0 + ph + 45, [{name: "p50", c: C.cat[5]}, {name: "p99", c: C.cat[3]},
+    {name: "p99.9", c: C.cat[0]}, {name: "mean (usec/calls)", c: C.red}], "end");
+  // right panel: tail ratio
+  const bx = fg.W / 2 + 12, bx1 = fg.W - 52;
+  const rs = rows.map(d => (isNum(d.avg_us) && d.avg_us > 0) ? d.p99_med / d.avg_us : null);
+  const fin = rs.filter(isNum);
+  const rmin = Math.min.apply(null, fin.concat([1])), rmax = Math.max.apply(null, fin.concat([1]));
+  const s2 = scale(rmin * 0.5, rmax * 3.4, bx, bx1, true);
+  xAxis(fg.g, s2, y0, y0 + ph, v => trim(nf(v, 2)) + "×");
+  panelTitle(fg.g, bx, 4, "Tail vs mean",
+    ">1 = mean hides a slower tail; <1 = a few outliers inflate the mean");
+  rows.forEach((d, i) => {
+    const y = y0 + i * ROWH + ROWH / 2, v = rs[i];
+    if (!isNum(v)) return;
+    const col = v > 3 ? C.red : (v < 1 ? C.indigo : C.axis);
+    const w = Math.max(0.6, s2(v) - bx);
+    fg.g.appendChild(E("rect", {x: bx, y: y - 5.4, width: w, height: 10.8, fill: col}));
+    fg.g.appendChild(TX(bx + w + 5, y, f1(v) + "×", {size: 7.9, fill: C.muted}));
+  });
+  fg.g.appendChild(E("line", {x1: s2(1), x2: s2(1), y1: y0, y2: y0 + ph,
+    stroke: C.ink2, "stroke-width": 0.9}));
+  axisLabel(fg.g, (bx + bx1) / 2, y0 + ph + 27, "p99 ÷ mean (log) — tail spread");
+  return fg.svg;
+}
+
+function figScatter() {
+  const g0 = PC.filter(d => d.rate > 0 && d.avg_us > 0);
+  if (!g0.length) return null;
+  const fg = figure({
+    h: 470, head: "Throughput against cost per call",
+    sub: "Marker area = total CPU time. Diagonals are iso-cost lines: every point on one " +
+      "consumes the same CPU.",
+    note: "Distance out along the diagonals, not height on either axis alone, is what makes " +
+      "a command expensive."
+  });
+  const x0 = 56, x1 = fg.W - 14, y0 = 12, y1 = 420;
+  const rmin = Math.min.apply(null, g0.map(d => d.rate)), rmax = Math.max.apply(null, g0.map(d => d.rate));
+  const amin = Math.min.apply(null, g0.map(d => d.avg_us)), amax = Math.max.apply(null, g0.map(d => d.avg_us));
+  const sx = scale(rmin * 0.3, rmax * 5, x0, x1, true);
+  const sy = scale(amin * 0.3, amax * 5, y1, y0, true);
+  xAxis(fg.g, sx, y0, y1, si);
+  yAxis(fg.g, sy, x0, x1, dur);
+  const cmax = Math.max.apply(null, g0.map(d => d.cpu_frac || 0)) || 1;
+  [[1e-6, "0.0001% of a core"], [1e-4, "0.01% of a core"], [1e-2, "1% of a core"],
+   [1, "one full core"]].forEach(([frac, lbl]) => {
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const x = sx.d[0] * Math.pow(sx.d[1] / sx.d[0], i / 40), y = frac * 1e6 / x;
+      if (y >= sy.d[0] && y <= sy.d[1]) pts.push(sx(x) + "," + sy(y));
+    }
+    if (pts.length < 2) return;
+    fg.g.appendChild(E("polyline", {points: pts.join(" "), fill: "none",
+      stroke: C.axis, "stroke-width": 0.8}));
+    const p = pts[pts.length - 1].split(",");
+    fg.g.appendChild(TX(+p[0] - 4, +p[1] - 8, lbl, {size: 7.6, anchor: "end", fill: C.muted}));
+  });
+  g0.forEach(d => {
+    const r = 3 + 17 * Math.pow((d.cpu_frac || 0) / cmax, 0.42);
+    fg.g.appendChild(E("circle", {cx: sx(d.rate), cy: sy(d.avg_us), r: r, fill: C.cat[0],
+      "fill-opacity": 0.6, stroke: C.surface, "stroke-width": 1.4}));
+  });
+  const lab = new Set([].concat(
+    topN("cpu_frac", 9).map(d => d.command), topN("rate", 7).map(d => d.command),
+    topN("avg_us", 3).map(d => d.command)));
+  g0.filter(d => lab.has(d.command)).forEach(d => {
+    fg.g.appendChild(TX(sx(d.rate) + 9, sy(d.avg_us) - 6, d.command,
+      {size: 8.2, mono: true, fill: C.ink}));
+  });
+  axisLabel(fg.g, (x0 + x1) / 2, y1 + 27, "throughput, calls/sec (log)");
+  fg.g.appendChild(TX(10, (y0 + y1) / 2, "mean time per call (log)",
+    {size: 8.8, anchor: "middle", rot: -90}));
+  return fg.svg;
+}
+
+function figHistogram() {
+  const g0 = byDesc(PC, "rate");
+  const fg = figure({
+    h: panelH(g0.length, false, false) + 6,
+    head: "Command frequency histogram — all " + T.n_commands + " commands",
+    sub: "Rate-normalised. Shard count shows how many shards ran the command at all."
+  });
+  barPanel(fg.g, {x: 0, y: 0, w: fg.W, log: true, color: C.cat[0], pad: 150,
+    items: g0.map(d => ({k: d.command, v: d.rate})),
+    fmt: (v) => si(v), xlabel: "calls/sec (log)"});
+  // annotate shard coverage to the right of each label
+  return fg.svg;
+}
+
+/* ================================================================== tables */
+let TID = 0;
+function table(o) {
+  const id = "t" + (++TID);
+  const rows = o.rows;
+  const wrap = document.createElement("div");
+  wrap.className = "tblwrap";
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  const capText = document.createElement("span");
+  capText.textContent = o.caption || "";
+  const capHint = document.createElement("span");
+  capHint.className = "hint";
+  capHint.textContent = "click a header to sort" + (o.csv === false ? "" : " · ");
+  cap.appendChild(capText);
+  cap.appendChild(capHint);
+  if (o.csv !== false) {
+    const b = document.createElement("button");
+    b.className = "csv";
+    b.textContent = "Download CSV";
+    b.onclick = () => downloadCSV(o);
+    capHint.appendChild(b);
+  }
+  wrap.appendChild(cap);
+  const sc = document.createElement("div");
+  sc.className = "scroll";
+  const tbl = document.createElement("table");
+  tbl.id = id;
+  const thead = document.createElement("thead");
+  const tr = document.createElement("tr");
+  o.cols.forEach((c, i) => {
+    const th = document.createElement("th");
+    th.textContent = c.label;
+    if (i === 0) th.className = "rh0";
+    th.onclick = () => sortBy(i);
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr);
+  tbl.appendChild(thead);
+  const tb = document.createElement("tbody");
+  tbl.appendChild(tb);
+  sc.appendChild(tbl);
+  wrap.appendChild(sc);
+
+  let dir = 1, sorted = rows.slice();
+  function paint() {
+    tb.innerHTML = "";
+    sorted.forEach(r => {
+      const trr = document.createElement("tr");
+      o.cols.forEach((c, i) => {
+        const cell = document.createElement(i === 0 ? "th" : "td");
+        if (i === 0) cell.className = "rh";
+        else if (c.align === "l") cell.className = "l";
+        const v = r[c.k];
+        cell.innerHTML = c.html ? c.html(v, r) : esc((c.fmt || (x => x === null || x === undefined ? DASH : x))(v, r));
+        trr.appendChild(cell);
+      });
+      tb.appendChild(trr);
+    });
+  }
+  function sortBy(i) {
+    const c = o.cols[i];
+    dir = (tbl.dataset.sortCol === String(i) && tbl.dataset.sortDir === "1") ? -1 : 1;
+    tbl.dataset.sortCol = String(i);
+    tbl.dataset.sortDir = String(dir);
+    sorted = rows.slice().sort((a, b) => {
+      const x = a[c.k], y = b[c.k];
+      if (isNum(x) && isNum(y)) return (x - y) * dir;
+      return String(x === null || x === undefined ? "" : x)
+        .localeCompare(String(y === null || y === undefined ? "" : y)) * dir;
+    });
+    tr.querySelectorAll("th").forEach((th, j) => {
+      th.className = (j === 0 ? "rh0 " : "") + (j === i ? (dir === 1 ? "asc" : "desc") : "");
+    });
+    paint();
+  }
+  paint();
+  return wrap;
+}
+function downloadCSV(o) {
+  const head = o.cols.map(c => c.label);
+  const lines = [head.map(csvCell).join(",")];
+  o.rows.forEach(r => lines.push(o.cols.map(c => {
+    const v = r[c.k];
+    return csvCell(v === null || v === undefined ? "" : v);
+  }).join(",")));
+  const blob = new Blob([lines.join("\n")], {type: "text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (o.file || "table") + ".csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const csvCell = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+
+function tiles(rows) {
+  return '<div class="tiles">' + rows.map(([l, v, n]) =>
+    '<div class="tile"><div class="tl">' + esc(l) + '</div><div class="tv">' + v +
+    '</div><div class="tn">' + esc(n || "") + '</div></div>').join("") + '</div>';
+}
+const U = '<span class="u">', UE = '</span>';
+
+/* =================================================================== render */
+const MARK = '<svg class="mark" viewBox="0 0 32 32" xmlns="' + NS + '" aria-hidden="true">' +
+  '<path d="M16 3.2 29 9.1c1 .5 1 1.3 0 1.8L16 16.8c-1 .5-2.6.5-3.6 0L3 11c-1-.5-1-1.3 0-1.8L16 3.2Z" fill="#FF4438"/>' +
+  '<path d="M29 15.2c1 .5 1 1.3 0 1.8L16 22.9c-1 .5-2.6.5-3.6 0L3 17c-1-.5-1-1.3 0-1.8l2.4-1.1 7 3.2c1 .5 2.6.5 3.6 0l7-3.2 6 1.1Z" fill="#FFF" opacity=".92"/>' +
+  '<path d="M29 21.3c1 .5 1 1.3 0 1.8L16 29c-1 .5-2.6.5-3.6 0L3 23.1c-1-.5-1-1.3 0-1.8l2.4-1.1 7 3.2c1 .5 2.6.5 3.6 0l7-3.2 6 1.1Z" fill="#FFF" opacity=".6"/></svg>';
+
+const SECS = [];
+function section(n, title, build, lead) {
+  SECS.push([n, title]);
+  const s = document.createElement("section");
+  s.id = "s" + n;
+  s.innerHTML = '<h2><span class="num">' + n + '</span>' + esc(title) + '</h2>' +
+    (lead ? '<p class="lead">' + lead + '</p>' : '');
+  build(s);
+  return s;
+}
+const html = (parent, s) => {
+  const d = document.createElement("div");
+  d.innerHTML = s;
+  while (d.firstChild) parent.appendChild(d.firstChild);
+};
+const fig = (parent, node) => {
+  if (!node) return;
+  const f = document.createElement("figure");
+  f.appendChild(node);
+  parent.appendChild(f);
+};
+
+function render() {
+  const root = document.getElementById("report");
+  if (!M) {
+    root.innerHTML = '<div class="wrap"><h1>No data</h1><p>This is the report template. ' +
+      'Run <code>extract.py --package … --database … --html out.html</code> to produce a ' +
+      'report from a support package.</p></div>';
+    return;
+  }
+  const DB = M.db, sc = M.scope, role = M.role_filter;
+  const TS = M.generated_at || "";
+  const body = document.createElement("div");
+  body.className = "wrap";
+  const nav = document.createElement("nav");
+  body.appendChild(nav);
+
+  /* -- 1 provenance ------------------------------------------------------- */
+  body.appendChild(section(1, "Provenance and integrity", s => {
+    html(s, tiles([
+      ["Snapshot taken", esc(TS.split(".")[0].replace("+00", "")) + " UTC",
+        "line 2 of node_*.rladmin"],
+      ["Database", esc(DB.name), "db:" + DB.id + (DB.type ? " · " + DB.type : "") +
+        (DB.memory_size ? " · " + DB.memory_size + " limit" : "")],
+      [role.charAt(0).toUpperCase() + role.slice(1) + " shards", String(sc.shards_used.length),
+        "of " + sc.shards_in_db + " in this database; " +
+        sc.shards_excluded_by_role.length + " excluded by role"],
+      ["Distinct commands", String(T.n_commands), "in INFO Commandstats"]
+    ]));
+    html(s, "<p>A support package can carry several databases, and the <code>DATABASES</code> " +
+      "and <code>SHARDS</code> tables in <code>node_*.rladmin</code> are both keyed by " +
+      "database, so every shard is attributable to exactly one. This report is scoped to <b>" +
+      esc(DB.name) + "</b> (<code>db:" + DB.id + "</code>), named explicitly rather than " +
+      "inferred; nothing below includes a shard belonging to any other database.</p>");
+    s.appendChild(table({
+      caption: "Every database declared in the package (" + M.databases.length + " found)",
+      file: "databases",
+      cols: [
+        {k: "db_id", label: "db:id", fmt: v => "db:" + v},
+        {k: "db_name", label: "name", align: "l"},
+        {k: "type", label: "type", align: "l"}, {k: "status", label: "status", align: "l"},
+        {k: "shards", label: "shards"}, {k: "memory_size", label: "memory"},
+        {k: "replication", label: "replication"}, {k: "persistence", label: "persistence"},
+        {k: "selected", label: "selected", align: "l",
+          fmt: v => v ? "yes — this report" : "no"}
+      ],
+      rows: M.databases
+    }));
+    s.appendChild(table({
+      caption: "Integrity checks", csv: false,
+      cols: [
+        {k: "check", label: "check", align: "l"},
+        {k: "result", label: "result", align: "l", html: v =>
+          '<span class="pill ' + (v === "PASS" ? "pass" : (v === "N/A" || v === "PARTIAL" ? "na" : "fail")) +
+          '">' + esc(v) + '</span>'},
+        {k: "detail", label: "detail", align: "l"}
+      ],
+      rows: M.checks.map(c => ({check: c[0], result: c[1], detail: c[2]}))
+    }));
+    html(s, '<p class="warn"><b>Counters cover ' +
+      (T.window_uniform ? "a uniform window" : "unequal windows") + '.</b> Shard uptimes range ' +
+      "from " + hours(T.uptime_min) + " to " + hours(T.uptime_max) + " — a " +
+      f1(T.uptime_spread) + "× spread. " + (T.window_uniform
+        ? "That is tight enough that summed counters are meaningful, but rates are still used " +
+          "below for comparability."
+        : "Summed raw counters are therefore <i>not</i> a coherent database total, and every " +
+          "figure below is rate-normalised (<code>calls ÷ uptime_in_seconds</code>) unless " +
+          "labelled cumulative.") + "</p>");
+    fig(s, figWindows());
+    html(s, "<p>The normalisation validates independently: summing per-shard " +
+      "<code>cmdstat</code> rates gives <b>" + f3(T.rate) + " calls/sec</b>, and summing " +
+      "<code>total_commands_processed ÷ uptime_in_seconds</code> — a different field " +
+      "in a different INFO section — gives <b>" + f3(T.tcp_rate) + " ops/sec</b>.</p>");
+  }));
+
+  /* -- 2 headline --------------------------------------------------------- */
+  const nerr = M.errors.reduce((a, e) => a + e.count, 0);
+  body.appendChild(section(2, "Headline figures", s => {
+    html(s, tiles([
+      ["Throughput", f0(T.rate) + U + "/s" + UE, "lifetime mean, rate-normalised"],
+      ["Current throughput", f0(T.iops) + U + "/s" + UE,
+        T.rate ? "instantaneous — " + f0(T.iops / T.rate * 100) + "% of lifetime mean" : ""],
+      ["CPU in commands", f1(T.cores * 1000) + U + "mc" + UE,
+        f2(T.cores * 100) + "% of one core, all shards"],
+      ["Cumulative calls", si(T.calls),
+        T.window_uniform ? "single window" : "mixed windows — see §1"]
+    ]));
+    html(s, tiles([
+      ["Top command", esc(byDesc(PC, "rate")[0].command), f0(CN.top1) + "% of all calls"],
+      ["Top 5 commands", f0(CN.top5) + U + "%" + UE, "of all calls"],
+      ["Commands for 90%", String(CN.n_for_90), "of " + CN.commands + " distinct commands"],
+      ["Errors recorded", int(nerr), M.errors.length + " distinct kinds"]
+    ]));
+  }, "Cumulative totals are shown for completeness but are the least trustworthy numbers on " +
+     "the page; the rate figures are the ones to read."));
+
+  /* -- 3 cohorts ---------------------------------------------------------- */
+  if (T.n_cohorts > 1) {
+    body.appendChild(section(3, "Measurement windows are not interchangeable", s => {
+      fig(s, figCohorts());
+      const order = M.cohort_order, first = order[0];
+      const idx = {};
+      M.cohort_commands.forEach((c, i) => idx[c] = i);
+      const flat = M.cohort_commands.filter(c => {
+        const vs = order.map(o => M.cohort_values[o][idx[c]] || 0);
+        const mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
+        return mn > 0 && mx / mn < 1.35;
+      });
+      const n = Math.min(18, M.cohort_commands.length);
+      const rows = M.cohort_commands.map(c => {
+        const r = {command: c};
+        order.forEach(o => r[o] = M.cohort_values[o][idx[c]]);
+        return r;
+      }).sort((a, b) => (b[first] || 0) - (a[first] || 0)).slice(0, n);
+      s.appendChild(table({
+        caption: "Calls/sec per shard within each uptime cohort — top " + n +
+          " commands by the " + first + " cohort",
+        file: "cohorts",
+        cols: [{k: "command", label: "command", align: "l"}].concat(
+          order.map(o => ({k: o, label: o, fmt: f2}))),
+        rows: rows
+      }));
+      if (flat.length) {
+        html(s, '<p class="find"><b>Reading.</b> ' +
+          flat.slice(0, 3).map(x => "<code>" + esc(x) + "</code>").join(", ") +
+          " are flat across the cohorts, which is what confirms the method works: " +
+          "infrastructure chatter runs at the same rate whatever the window. Against that " +
+          "baseline, any command that differs sharply between cohorts reflects a change in the " +
+          "workload over time rather than an artefact of measurement.</p>");
+      }
+    }, "The " + NSH + " shards do not share a measurement window. Shards that restarted " +
+       "together have near-identical uptimes, so cohorts fall out of the gaps in the uptime " +
+       "list — and comparing cohorts turns a nuisance into a crude time axis."));
+  }
+
+  /* -- 4 mix -------------------------------------------------------------- */
+  body.appendChild(section(4, "Workload mix and cost", s => {
+    fig(s, figMix());
+    fig(s, figShares());
+    const n = Math.min(20, PC.length);
+    s.appendChild(table({
+      caption: "Top " + n + " commands by throughput", file: "commands_top",
+      cols: [
+        {k: "command", label: "command", align: "l"},
+        {k: "rate", label: "calls/sec", fmt: f2},
+        {k: "rate_share", label: "% of calls", fmt: v => f2(v * 100) + "%"},
+        {k: "calls", label: "cum. calls", fmt: si},
+        {k: "avg_us", label: "mean µs", fmt: f1},
+        {k: "p50_med", label: "p50 µs", fmt: f1},
+        {k: "p99_med", label: "p99 µs", fmt: f1},
+        {k: "p999_med", label: "p99.9 µs", fmt: f1},
+        {k: "cpu_frac", label: "milli-cores", fmt: v => f3(v * 1000)},
+        {k: "cpu_share", label: "% of CPU", fmt: v => f2(v * 100) + "%"},
+        {k: "shards", label: "shards", fmt: v => v + "/" + NSH}
+      ],
+      rows: topN("rate", n)
+    }));
+  }, "Share of calls and share of CPU time are uptime-invariant, which is what makes them " +
+     "valid on a single capture."));
+
+  /* -- 5 scatter ---------------------------------------------------------- */
+  body.appendChild(section(5, "Cost per call against volume", s => { fig(s, figScatter()); },
+    "The two dimensions that decide where tuning pays off. Diagonals are iso-cost lines; " +
+    "marker area is total CPU time."));
+
+  /* -- 6 percentiles ------------------------------------------------------ */
+  if (hasLat()) {
+    body.appendChild(section(6, "Latency distribution, not just means", s => {
+      fig(s, figPercentiles());
+      html(s, '<p class="warn"><b>Percentiles are not additive.</b> A p99 cannot be summed or ' +
+        "averaged across shards without distorting it, so the figure shows the <i>median across " +
+        "the " + NSH + " shards</i> and the tables carry the min and max. Treat these as the " +
+        "typical shard's tail, not the database's true p99 — that would need the underlying " +
+        "histograms, which <code>INFO</code> does not expose.</p>");
+    }, "Commandstats carries only means, so it cannot separate uniformly-slow from " +
+       "usually-fast-with-a-bad-tail. INFO Latencystats does carry percentiles."));
+  }
+
+  /* -- 7 distribution ----------------------------------------------------- */
+  body.appendChild(section(7, "Concentration and distribution", s => {
+    fig(s, figConcentration());
+    fig(s, figBins());
+    const B = magBins(PC.map(d => d.rate));
+    s.appendChild(table({
+      caption: "How many commands fall in each throughput band", file: "magnitude_bins",
+      cols: [{k: "bin", label: "magnitude bin", align: "l"},
+             {k: "n", label: "commands (by rate)", fmt: f0}],
+      rows: B.labels.map((l, i) => ({bin: l, n: B.counts[i]}))
+    }));
+    fig(s, figPartToWhole());
+  }));
+
+  /* -- 8 skew ------------------------------------------------------------- */
+  body.appendChild(section(8, "Load skew across shards", s => {
+    s.appendChild(heatmap());
+    s.appendChild(table({
+      caption: "Per-shard totals, ranked by rate-normalised throughput", file: "shards",
+      cols: [
+        {k: "shard", label: "shard", fmt: v => "redis:" + v},
+        {k: "node", label: "node", fmt: v => "node:" + v},
+        {k: "cohort", label: "cohort", align: "l"},
+        {k: "uptime_h", label: "uptime (h)", fmt: f1},
+        {k: "rate", label: "calls/sec", fmt: f1},
+        {k: "rate_share", label: "% of db calls", fmt: v => f2(v * 100) + "%"},
+        {k: "calls", label: "cum. calls", fmt: si},
+        {k: "commands", label: "commands", fmt: f0},
+        {k: "iops", label: "current ops/s", fmt: f0},
+        {k: "expired_keys", label: "expired keys", fmt: si},
+        {k: "run_id", label: "run_id", align: "l", fmt: v => v ? String(v).slice(0, 12) : DASH}
+      ],
+      rows: byDesc(PS, "rate")
+    }));
+  }, "Shard-vs-shard comparison, which a single capture supports in place of the " +
+     "cross-cluster comparison a second capture would allow."));
+
+  /* -- 9 errors ----------------------------------------------------------- */
+  body.appendChild(section(9, "Errors", s => {
+    if (M.errors.length) {
+      s.appendChild(table({
+        caption: "INFO Errorstats, summed across the selected shards", file: "errorstats",
+        cols: [{k: "error", label: "error", align: "l"}, {k: "count", label: "count", fmt: int}],
+        rows: M.errors
+      }));
+    } else {
+      html(s, "<p>No Errorstats entries in this capture.</p>");
+    }
+    html(s, "<p>These are the named error replies behind the aggregate " +
+      "<code>rejected_calls</code> (" + int(T.rejected) + ") and <code>failed_calls</code> (" +
+      int(T.failed) + ") columns. Errorstats counts error <i>replies</i> and Commandstats " +
+      "counts <i>calls</i> that failed, so the first is normally the larger of the two: " +
+      "a single fan-out call can collect an error from every shard it touched." +
+      (isNum(T.error_replies) ? " <code>total_error_replies</code> for these shards is <b>" +
+        int(T.error_replies) + "</b>." : "") + "</p>");
+    const failing = PC.filter(d => d.fail_rate >= 0.0001 &&
+        (d.failed_calls + d.rejected_calls) > 0)
+      .sort((a, b) => b.fail_rate - a.fail_rate);
+    if (failing.length) {
+      s.appendChild(table({
+        caption: "Commands returning errors, by failure rate — a command failing most of " +
+          "the time is spending CPU on work that is discarded",
+        file: "failing_commands",
+        cols: [
+          {k: "command", label: "command", align: "l"},
+          {k: "fail_rate", label: "% of calls failing", fmt: v => f2(v * 100) + "%"},
+          {k: "failed_calls", label: "failed", fmt: int},
+          {k: "rejected_calls", label: "rejected", fmt: int},
+          {k: "calls", label: "calls", fmt: si},
+          {k: "avg_us", label: "mean µs", fmt: f1},
+          {k: "cpu_share", label: "% of CPU", fmt: v => f2(v * 100) + "%"},
+          {k: "shards", label: "shards", fmt: v => v + "/" + NSH}
+        ],
+        rows: failing
+      }));
+    }
+    const er = M.errors_reconcile;
+    if (er.ok === true) {
+      html(s, '<p class="find"><b>These two sections reconcile exactly</b>, which is a useful ' +
+        "check on the whole parse: " + esc(er.msg) + ". Errorstats and Commandstats are " +
+        "populated by different code paths in Redis, so agreement to the unit means neither " +
+        "section was mis-parsed and no shard file was read twice or skipped.</p>");
+    } else if (er.ok === false) {
+      html(s, '<p class="warn"><b>These sections do not reconcile:</b> ' + esc(er.msg) +
+        ". Worth investigating before relying on the error columns.</p>");
+    }
+  }));
+
+  /* -- 10 findings -------------------------------------------------------- */
+  body.appendChild(section(10, "Findings", s => {
+    const items = (FINDINGS && FINDINGS.length) ? FINDINGS : M.auto_findings;
+    html(s, "<ul>" + items.map(x => "<li>" + x + "</li>").join("") + "</ul>");
+  }));
+
+  /* -- 11 caveats --------------------------------------------------------- */
+  body.appendChild(section(11, "Caveats", s => {
+    html(s, "<ul>" +
+      "<li><b><code>usec</code> is CPU time inside the command</b>, not client-observed " +
+      "latency. It excludes network round-trip, client queueing and scheduling delay, so a " +
+      "command can look cheap here and still be slow from the application's point of view.</li>" +
+      "<li><b>Rates are lifetime means.</b> <code>calls ÷ uptime</code> spreads all traffic " +
+      "evenly across each shard's window, so where traffic was bursty the mean sits below the " +
+      "peak and above the present. <code>instantaneous_ops_per_sec</code> is the only current " +
+      "figure available.</li>" +
+      (hasLat() ? "<li><b>Percentiles are per-shard</b> — see §6; the medians shown " +
+        "are not the database's p99.</li>" : "") +
+      "<li><b>One database, " + role + " shards only.</b> Scoped to <b>" + esc(DB.name) +
+      "</b> (<code>db:" + DB.id + "</code>). A package holding several databases needs one " +
+      "report per database. " + (role === "master"
+        ? "Replicas are excluded so replicated writes are not double-counted." : "") + "</li>" +
+      "<li><b>Cohort boundaries are inferred from uptime</b>, not from an event log. The split " +
+      "is unambiguous in the data, but what caused the restarts is not visible in a support " +
+      "package.</li>" +
+      "<li><b>No delta view.</b> Everything here is a snapshot. Growth, rates of change and " +
+      "latency drift need two packages whose per-shard <code>run_id</code>s match — if a " +
+      "shard restarted between captures, its counters reset and any difference is " +
+      "meaningless.</li>" +
+      "<li><b>The data is embedded, not live.</b> This report was rendered from " +
+      "<code>" + esc(M.package) + "</code> at analysis time; reopening it will not re-read the " +
+      "package.</li>" +
+      "</ul>");
+  }));
+
+  /* -- 12 appendix -------------------------------------------------------- */
+  body.appendChild(section(12, "Appendix — all commands", s => {
+    s.appendChild(table({
+      caption: "All " + T.n_commands + " commands, ranked by throughput", file: "commands_all",
+      cols: [
+        {k: "command", label: "command", align: "l"},
+        {k: "rate", label: "calls/sec", fmt: f3},
+        {k: "calls", label: "calls", fmt: si}, {k: "usec", label: "usec", fmt: si},
+        {k: "avg_us", label: "mean µs", fmt: f1},
+        {k: "p50_med", label: "p50 µs", fmt: f1},
+        {k: "p99_med", label: "p99 µs", fmt: f1},
+        {k: "p999_med", label: "p99.9 µs", fmt: f1},
+        {k: "p99_max", label: "p99 max µs", fmt: f1},
+        {k: "rejected_calls", label: "rejected", fmt: int},
+        {k: "failed_calls", label: "failed", fmt: int},
+        {k: "fail_rate", label: "% failing", fmt: v => v > 0 ? f2(v * 100) + "%" : "—"},
+        {k: "rate_share", label: "% of calls", fmt: v => f3(v * 100) + "%"},
+        {k: "cpu_share", label: "% of CPU", fmt: v => f3(v * 100) + "%"},
+        {k: "shards", label: "shards", fmt: v => v + "/" + NSH}
+      ],
+      rows: byDesc(PC, "rate")
+    }));
+    fig(s, figHistogram());
+  }));
+
+  nav.innerHTML = SECS.map(([n, t]) => '<a href="#s' + n + '">' + n + ". " + esc(t) + "</a>").join("");
+
+  const head = document.createElement("div");
+  head.className = "masthead";
+  head.innerHTML = '<div class="inner"><div class="brandline">' + MARK +
+    '<div class="brandname">Redis<span>Enterprise diagnostics</span></div></div>' +
+    "<h1>INFO commandstats — single-snapshot analysis</h1>" +
+    '<p class="sub">Database <b>' + esc(DB.name) + "</b> (<code>db:" + DB.id + "</code>) · <b>" +
+    sc.shards_used.length + " " + role + " shards</b> of " + sc.shards_in_db +
+    " · from support package <code>" + esc(M.package) + "</code></p>" +
+    '<p class="meta">Snapshot <b>' + esc(TS) + "</b> &nbsp;·&nbsp; rate-normalised " +
+    "throughout &nbsp;·&nbsp; " + T.n_commands + " commands &nbsp;·&nbsp; " +
+    T.n_cohorts + " measurement window(s)</p></div>";
+  const rule = document.createElement("div");
+  rule.className = "redrule";
+
+  const foot = document.createElement("footer");
+  foot.innerHTML = "Generated from <code>" + esc(M.package) + "</code>, scoped to database <b>" +
+    esc(DB.name) + "</b> (<code>db:" + DB.id + "</code>) — the INFO Commandstats, " +
+    "Latencystats, Errorstats and Server sections of " + sc.shards_used.length + " " + role +
+    " shard files, with shard roles and capture time from <code>node_*.rladmin</code>. " +
+    "Databases in package: " + M.databases.map(d => "db:" + d.db_id + " (" + esc(d.db_name) + ")")
+      .join(", ") + ". Percentiles are per-shard medians and are not additive; sections needing " +
+    "a second capture are marked N/A in §1.<br><br>" +
+    "Styling uses Redis design tokens — Redis Red <code>#FF4438</code>, Dusk " +
+    "<code>#163341</code>, Ink <code>#091A23</code> — and the Space Grotesk / Space Mono " +
+    "pairing, per <code>redis/docs</code> theme config. Figures are inline SVG; no network " +
+    "resources are loaded.";
+  body.appendChild(foot);
+
+  root.appendChild(head);
+  root.appendChild(rule);
+  root.appendChild(body);
+  document.title = "Redis commandstats — " + DB.name + " (db:" + DB.id +
+    ") · single-snapshot analysis";
+}
+
+/* Load skew as a coloured table rather than an image: sortable, hoverable, and
+   it prints. Dashes are commands the shard never served. */
+function heatmap() {
+  const sk = M.skew;
+  const wrap = document.createElement("div");
+  wrap.className = "tblwrap";
+  const flat = [];
+  sk.values.forEach(row => row.forEach(v => { if (isNum(v) && v > 0) flat.push(v); }));
+  const lo = flat.length ? Math.log10(Math.min.apply(null, flat)) : 0;
+  const hi = flat.length ? Math.log10(Math.max.apply(null, flat)) : 1;
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  cap.innerHTML = "<span>Load skew across shards — top " + sk.commands.length +
+    " commands by rate. Cell shading is log₁₀ calls/sec.</span>" +
+    '<span class="hint">dashes are commands the shard never served</span>';
+  wrap.appendChild(cap);
+  const sc = document.createElement("div");
+  sc.className = "scroll";
+  let h = "<table><thead><tr><th>command</th>" +
+    sk.shards.map(s => "<th>redis:" + s + "</th>").join("") + "</tr></thead><tbody>";
+  sk.commands.forEach((c, i) => {
+    h += '<tr><th class="rh">' + esc(c) + "</th>";
+    sk.values[i].forEach(v => {
+      if (!isNum(v) || v <= 0) {
+        h += '<td class="heat" style="background:' + C.plane + '">' + DASH + "</td>";
+      } else {
+        const t = (hi - lo) > 0 ? (Math.log10(v) - lo) / (hi - lo) : 0.5;
+        const bg = rampAt(t);
+        h += '<td class="heat" style="background:' + bg + ";color:" + onColor(bg) + '">' +
+          si(v) + "</td>";
+      }
+    });
+    h += "</tr>";
+  });
+  h += "</tbody></table>";
+  sc.innerHTML = h;
+  wrap.appendChild(sc);
+  return wrap;
+}
+
+render();
+</script>
+</body>
+</html>

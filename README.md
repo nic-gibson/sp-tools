@@ -48,21 +48,23 @@ offered and only one of them will receive updates.
 | --- | --- | --- |
 | `command-stats` | `redis-commandstats-report` | Builds a Redis-branded HTML report of `INFO commandstats` for one named database in a debuginfo package, and screens package pairs for counter resets |
 
-Two scripts are the entry points, and the skill drives them:
+One script is the entry point, and the skill drives it:
 
 ```bash
 # what databases are in this package?
-python3 scripts/commandstats_report.py --package debuginfo.XXX.tar.gz --list
+python3 scripts/extract.py --package debuginfo.XXX.tar.gz --list
 
-# the report
-python3 scripts/commandstats_report.py \
-    --package debuginfo.XXX.tar.gz --database pers-3950 --outdir ~/Downloads
+# the report — a single self-contained HTML file
+python3 scripts/extract.py \
+    --package debuginfo.XXX.tar.gz --database pers-3950 --html /tmp/report.html
 
 # can these two packages legitimately be differenced?
-python3 scripts/check_pair.py --before A.tar.gz --after B.tar.gz --database pers-3950
+python3 scripts/extract.py --pair A.tar.gz B.tar.gz --database pers-3950
 ```
 
-Requires `pandas`, `numpy` and `matplotlib`.
+**No dependencies** — Python 3.7+ standard library only. The report is one HTML
+document with inline SVG figures and no network resources, meant to be opened as
+an artifact inside Claude but equally usable as a file.
 
 ## For maintainers
 
@@ -76,11 +78,13 @@ sp-tools/
 │   └── command-stats/
 │       ├── .claude-plugin/
 │       │   └── plugin.json        the plugin manifest
-│       └── skills/
-│           └── redis-commandstats-report/
-│               ├── SKILL.md       frontmatter (name, description) + instructions
-│               ├── references/    docs loaded on demand
-│               └── scripts/       executables the skill calls
+│       ├── skills/
+│       │   └── redis-commandstats-report/
+│       │       ├── SKILL.md       frontmatter (name, description) + instructions
+│       │       ├── assets/        the HTML report template the script fills in
+│       │       ├── references/    docs loaded on demand
+│       │       └── scripts/       executables the skill calls
+│       └── tests/                 end-to-end suite (bash tests/run.sh)
 └── README.md
 ```
 

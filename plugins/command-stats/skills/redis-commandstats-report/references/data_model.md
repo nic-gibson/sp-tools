@@ -171,20 +171,44 @@ ago" into "shard 7 is hot".
 
 ## Extending the report
 
-The scripts are layered so you can reuse the parts without the whole:
+Everything numeric lives in `scripts/extract.py`, standard library only. It is
+importable, so for a one-off question building the model and working with plain
+dicts is usually faster than adding a section to the report:
 
-- `parse.py` — package and rladmin reading, database resolution, INFO splitting.
-  `parse.load(package, database, role)` returns `(info, cmd, lat, err, meta)` as
-  tidy frames.
-- `metrics.py` — rate normalisation, uptime-cohort detection, concentration,
-  skew, and the reconciliation helpers. `ADMIN_COMMANDS` and `WRITE_PREFIXES`
-  classify commands; extend them for module-heavy workloads.
-- `brand.py` — Redis design tokens and matplotlib setup.
-- `charts.py` — one function per figure, each returning an SVG string.
-- `render.py` — HTML assembly and the derived findings.
+```python
+import sys, tempfile
+sys.path.insert(0, 'scripts')
+import extract
 
-For a one-off question, importing `parse` and `metrics` and working with the
-frames directly is usually faster than adding a section to the report.
+b = extract.open_bundle('debuginfo.XXX.tar.gz', tempfile.mkdtemp())
+db_id, db_name = extract.resolve_database(b, 'pers-3950')
+files, in_db, want = extract.select_shards(b, db_id, 'master')
+M = extract.build(b, db_id, db_name, 'master', files, in_db, want)
+
+M['per_cmd']      # one dict per command: rate, cpu_frac, shares, percentiles, fail_rate
+M['per_shard']    # one dict per shard: rate, uptime, cohort, run_id, iops
+M['totals']       # database-wide scalars
+M['checks']       # the integrity table, as (check, result, detail) triples
+```
+
+The pieces worth knowing about:
+
+- `open_bundle` / `resolve_database` / `select_shards` — reading the tar and
+  scoping to one database. Only the rladmin files and the shard files for the
+  selected database and role are ever extracted.
+- `parse_shard_file` — splits one `redis_NN.txt` into commandstats,
+  latencystats, errorstats and meta. Add a field to `_META_KEYS` to surface it.
+- `build` — everything derived. Nothing downstream recomputes a quantity.
+- `ADMIN_COMMANDS` and `WRITE_PREFIXES` classify commands; extend them for
+  module-heavy workloads, where the defaults will not know your command names.
+- `auto_findings` — the derived prose, and the thresholds that decide which
+  findings apply. Callers can replace the wording via `--findings`; they cannot
+  replace the thresholds, which is deliberate.
+
+`assets/report_template.html` is presentation only — CSS, a small SVG chart kit,
+and one function per figure. Adding a figure means adding a function there and
+calling it from `render()`; it never needs to compute anything, because the model
+already carries it.
 
 Cohort detection splits on a ratio between consecutive sorted uptimes
 (default 1.5×), on the reasoning that shards restarted in the same wave differ by
