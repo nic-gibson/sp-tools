@@ -108,6 +108,9 @@ tbody tr:hover{background:var(--yellow-100)}
 td.heat{font-family:var(--mono);font-size:10.5px;text-align:center;padding:5px 8px}
 .warn{background:var(--yellow-100);border-left:3px solid var(--yellow);padding:14px 18px;
 border-radius:0 4px 4px 0;font-size:13.8px;margin:22px 0}
+.explain{color:var(--ink2);font-size:13.5px;max-width:96ch;margin:-6px 0 26px;
+line-height:1.55}
+.explain b{color:var(--ink);font-weight:600}
 .find{background:#FFF4F3;border-left:3px solid var(--red);padding:14px 18px;
 border-radius:0 4px 4px 0;font-size:13.8px;margin:22px 0}
 ul{margin:0 0 16px;padding-left:21px}
@@ -177,6 +180,10 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 }
+
+const SUP = {"-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³",
+             "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"};
+const sup = n => String(n).split("").map(c => SUP[c] || c).join("");
 
 /* ================================================================ palette */
 /* Dusk leads so Redis Red stays available for emphasis and polarity rather than
@@ -544,7 +551,7 @@ function magBins(vals) {
   const labels = [], counts = [];
   for (let e = lo; e < Math.max(hi, lo + 1); e++) {
     const a = Math.pow(10, e), b = Math.pow(10, e + 1);
-    labels.push("10^" + e + "–10^" + (e + 1));
+    labels.push("10" + sup(e) + "–10" + sup(e + 1));
     counts.push(v.filter(x => x >= a && x < b).length);
   }
   return {labels: labels, counts: counts};
@@ -911,6 +918,11 @@ function render() {
       ],
       rows: M.databases
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> One row per database enumerated ' +
+      "from the cluster's rladmin tables. The <b>selected</b> column marks the database this " +
+      "report covers; every shard belonging to any other database is excluded from the numbers " +
+      "below. If the wrong database is highlighted, re-run <code>extract.py</code> with a " +
+      "different <code>--database</code> selector.</p>");
     s.appendChild(table({
       caption: "Integrity checks", csv: false,
       cols: [
@@ -922,6 +934,11 @@ function render() {
       ],
       rows: M.checks.map(c => ({check: c[0], result: c[1], detail: c[2]}))
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> Cross-checks against fields that ' +
+      "Commandstats and other INFO sections independently populate — the same quantity has to " +
+      "match through two different code paths. A <b>PASS</b> means the numbers reconcile and " +
+      "the parse is trustworthy; a <b>FAIL</b> should be taken seriously before relying on " +
+      "anything below.</p>");
     html(s, '<p class="warn"><b>Counters cover ' +
       (T.window_uniform ? "a uniform window" : "unequal windows") + '.</b> Shard uptimes range ' +
       "from " + hours(T.uptime_min) + " to " + hours(T.uptime_max) + " — a " +
@@ -932,6 +949,11 @@ function render() {
           "figure below is rate-normalised (<code>calls ÷ uptime_in_seconds</code>) unless " +
           "labelled cumulative.") + "</p>");
     fig(s, figWindows());
+    html(s, '<p class="explain"><b>How to read it.</b> One row per shard, two bars each. The ' +
+      "upper bar is the shard's <b>uptime</b> — the length of the window its lifetime counters " +
+      "actually cover. The lower bar is that shard's throughput, calls ÷ uptime. If the upper " +
+      "bars are not all the same length, summed raw counts would blend windows of different " +
+      "lengths and be meaningless — which is why the whole rest of the report uses rates.</p>");
     html(s, "<p>The normalisation validates independently: summing per-shard " +
       "<code>cmdstat</code> rates gives <b>" + f3(T.rate) + " calls/sec</b>, and summing " +
       "<code>total_commands_processed ÷ uptime_in_seconds</code> — a different field " +
@@ -963,6 +985,12 @@ function render() {
   if (T.n_cohorts > 1) {
     body.appendChild(section(3, "Measurement windows are not interchangeable", s => {
       fig(s, figCohorts());
+      html(s, '<p class="explain"><b>How to read it.</b> Shards are grouped into cohorts by ' +
+        "similar uptime — shards that restarted together share one. Because the cohorts are " +
+        "non-overlapping windows on the same database, comparing rates across them turns the " +
+        "uptime spread into a crude time axis. A command whose bar height is roughly equal " +
+        "across cohorts has held steady; one that jumps between cohorts shows the workload " +
+        "changing over time.</p>");
       const order = M.cohort_order, first = order[0];
       const idx = {};
       M.cohort_commands.forEach((c, i) => idx[c] = i);
@@ -985,6 +1013,11 @@ function render() {
           order.map(o => ({k: o, label: o, fmt: f2}))),
         rows: rows
       }));
+      html(s, '<p class="explain"><b>What this shows.</b> The same story as the figure with ' +
+        "the numbers behind it. One row per command, one column per cohort, rate-normalised so " +
+        "the values are directly comparable. Flat rows are the honest baseline that says the " +
+        "method works; rows where one column stands out are where the workload actually " +
+        "shifted.</p>");
       if (flat.length) {
         html(s, '<p class="find"><b>Reading.</b> ' +
           flat.slice(0, 3).map(x => "<code>" + esc(x) + "</code>").join(", ") +
@@ -1001,7 +1034,18 @@ function render() {
   /* -- 4 mix -------------------------------------------------------------- */
   body.appendChild(section(4, "Workload mix and cost", s => {
     fig(s, figMix());
+    html(s, '<p class="explain"><b>How to read it.</b> Two panels ranking the same set of ' +
+      "commands by two different measures. The left panel is <b>throughput</b> — how often " +
+      "each command runs. The right panel is <b>CPU cost</b> — how much time each command " +
+      "consumed. The most-called command is rarely the most expensive; a command that appears " +
+      "only in the right panel is expensive per call and worth attention even if its rate is " +
+      "modest, and one only in the left is common but cheap.</p>");
     fig(s, figShares());
+    html(s, '<p class="explain"><b>How to read it.</b> The same commands plotted twice: share ' +
+      "of calls above, share of CPU below. A command whose two bars are similar is behaving " +
+      "as expected for its cost. A command whose CPU share dwarfs its call share is doing " +
+      "heavy work per call; the reverse is cheap and common. Both quantities are " +
+      "uptime-invariant, so they remain valid even when the counter windows disagree.</p>");
     const n = Math.min(20, PC.length);
     s.appendChild(table({
       caption: "Top " + n + " commands by throughput", file: "commands_top",
@@ -1020,11 +1064,25 @@ function render() {
       ],
       rows: topN("rate", n)
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> The commands from the figures with the ' +
+      "underlying numbers. <b>calls/sec</b> and <b>mean µs</b> are rate-normalised; the " +
+      "<b>p50/p99/p99.9</b> columns are medians across shards from INFO Latencystats (see §6 " +
+      "for why medians and not sums); <b>% of CPU</b> is uptime-invariant. Click any column " +
+      "header to sort, and use <b>Download CSV</b> for offline analysis.</p>");
   }, "Share of calls and share of CPU time are uptime-invariant, which is what makes them " +
      "valid on a single capture."));
 
   /* -- 5 scatter ---------------------------------------------------------- */
-  body.appendChild(section(5, "Cost per call against volume", s => { fig(s, figScatter()); },
+  body.appendChild(section(5, "Cost per call against volume", s => {
+    fig(s, figScatter());
+    html(s, '<p class="explain"><b>How to read it.</b> Each dot is one command. The x-axis is ' +
+      "throughput (log), the y-axis is mean cost per call (log), and the marker's <b>area</b> " +
+      "is total CPU time. Diagonals join equal-CPU points — anything on the same diagonal " +
+      "costs the same overall — so the biggest dots in the upper right are the commands " +
+      "driving CPU. A big dot high up on the y-axis but low on x is expensive per call and " +
+      "worth tuning; a big dot low on y but far right is cheap-and-common — you'd save more by " +
+      "issuing fewer of them than by making each one faster.</p>");
+  },
     "The two dimensions that decide where tuning pays off. Diagonals are iso-cost lines; " +
     "marker area is total CPU time."));
 
@@ -1032,6 +1090,12 @@ function render() {
   if (hasLat()) {
     body.appendChild(section(6, "Latency distribution, not just means", s => {
       fig(s, figPercentiles());
+      html(s, '<p class="explain"><b>How to read it.</b> One row per command, three bars per ' +
+        "row (p50, p99, p99.9). The plotted value is the <b>median across shards</b>, with " +
+        "the min–max range faded behind it. A wide fade means one shard is much slower on " +
+        "this command than its peers — usually a hot key on a single shard; a tight fade " +
+        "means the timing is uniform. If p99 sits far above p50, the command has a bad tail " +
+        "that a mean would hide.</p>");
       html(s, '<p class="warn"><b>Percentiles are not additive.</b> A p99 cannot be summed or ' +
         "averaged across shards without distorting it, so the figure shows the <i>median across " +
         "the " + NSH + " shards</i> and the tables carry the min and max. Treat these as the " +
@@ -1044,7 +1108,17 @@ function render() {
   /* -- 7 distribution ----------------------------------------------------- */
   body.appendChild(section(7, "Concentration and distribution", s => {
     fig(s, figConcentration());
+    html(s, '<p class="explain"><b>How to read it.</b> Commands are ranked left-to-right by ' +
+      "throughput, the y-axis is share of calls. A curve that plummets in the first few ranks " +
+      "means the workload is highly concentrated — tuning the top command visibly moves the " +
+      "whole database. A shallow, long tail means load is spread across many commands and no " +
+      "single fix will dominate.</p>");
     fig(s, figBins());
+    html(s, '<p class="explain"><b>How to read it.</b> A histogram in log space. The left ' +
+      "panel bins commands by throughput (how many run at 10–100 calls/sec, at 100–1000, at " +
+      "1000–10,000, and so on); the right panel bins by mean cost per call. A right-heavy " +
+      "throughput chart means the workload is dominated by high-rate commands; a right-heavy " +
+      "cost chart means individual calls are doing a lot of work.</p>");
     const B = magBins(PC.map(d => d.rate));
     s.appendChild(table({
       caption: "How many commands fall in each throughput band", file: "magnitude_bins",
@@ -1052,12 +1126,27 @@ function render() {
              {k: "n", label: "commands (by rate)", fmt: f0}],
       rows: B.labels.map((l, i) => ({bin: l, n: B.counts[i]}))
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> The counts behind the throughput half ' +
+      "of the histogram. Each row is one order-of-magnitude band and the number of distinct " +
+      "commands whose rate lands in it.</p>");
     fig(s, figPartToWhole());
+    html(s, '<p class="explain"><b>How to read it.</b> Two stacked bars — calls above, CPU ' +
+      "time below — showing what fraction of the workload the top few commands account for " +
+      "versus the folded tail. A narrow <b>other</b> segment means a small handful of commands " +
+      "carries the database; a wide <b>other</b> means the tail is doing real work and " +
+      "cannot be ignored when tuning.</p>");
   }));
 
   /* -- 8 skew ------------------------------------------------------------- */
   body.appendChild(section(8, "Load skew across shards", s => {
     s.appendChild(heatmap());
+    html(s, '<p class="explain"><b>How to read it.</b> Rows are the top commands, columns are ' +
+      "shards. Cell shading is log₁₀ calls/sec — brighter is hotter — and a dash means the " +
+      "shard never served that command. In an evenly-hashed cluster, a row should shade " +
+      "uniformly across every column; a row where one or two cells are dramatically brighter " +
+      "than the rest points at a <b>hot key or hot slot</b> concentrating traffic on those " +
+      "shards. Sparse rows (many dashes) indicate commands only some shards see — often " +
+      "cluster-admin traffic hitting a single node.</p>");
     s.appendChild(table({
       caption: "Per-shard totals, ranked by rate-normalised throughput", file: "shards",
       cols: [
@@ -1075,6 +1164,13 @@ function render() {
       ],
       rows: byDesc(PS, "rate")
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> One row per shard, ranked by ' +
+      "throughput. The <b>% of db calls</b> column is the fair-share check: with " +
+      NSH + " shards, an even distribution would put each near " + f2(100 / NSH) + "%. " +
+      "Shards well above that are absorbing extra work — usually from a hot key on their " +
+      "hash slots. <b>run_id</b> distinguishes shards that restarted (their counters cover a " +
+      "shorter window than their peers), which is why the shard order in this table and in " +
+      "the heatmap above may not agree.</p>");
   }, "Shard-vs-shard comparison, which a single capture supports in place of the " +
      "cross-cluster comparison a second capture would allow."));
 
@@ -1086,6 +1182,12 @@ function render() {
         cols: [{k: "error", label: "error", align: "l"}, {k: "count", label: "count", fmt: int}],
         rows: M.errors
       }));
+      html(s, '<p class="explain"><b>What this shows.</b> One row per distinct error reply. ' +
+        "These are the categorical labels — <code>WRONGTYPE</code>, <code>ERR</code>, " +
+        "<code>MOVED</code>, and so on — behind the aggregate rejected and failed counters " +
+        "carried by every command. A dominant error kind is usually diagnostic by itself: " +
+        "a lot of <code>WRONGTYPE</code> points at a schema mismatch between callers, a lot " +
+        "of <code>OOM</code> or <code>MISCONF</code> at cluster health.</p>");
     } else {
       html(s, "<p>No Errorstats entries in this capture.</p>");
     }
@@ -1116,6 +1218,12 @@ function render() {
         ],
         rows: failing
       }));
+      html(s, '<p class="explain"><b>What this shows.</b> Only commands whose fail rate ' +
+        "exceeds a floor, ranked by that rate. A command failing on most of its calls is " +
+        "spending CPU on work whose result is thrown away — the <b>% of CPU</b> column tells " +
+        "you how much that is worth chasing. If <b>rejected</b> dominates, the caller is " +
+        "being told <i>don't do that</i> (WRONGTYPE, missing key, ACL); if <b>failed</b> " +
+        "dominates, execution itself hit a problem.</p>");
     }
     const er = M.errors_reconcile;
     if (er.ok === true) {
@@ -1186,7 +1294,15 @@ function render() {
       ],
       rows: byDesc(PC, "rate")
     }));
+    html(s, '<p class="explain"><b>What this shows.</b> The full inventory — every distinct ' +
+      "command with the same columns as §4, at higher precision. Sortable by any column; the " +
+      "<b>Download CSV</b> button hands the exact rows over for spreadsheet work.</p>");
     fig(s, figHistogram());
+    html(s, '<p class="explain"><b>How to read it.</b> Every command as a rate-ranked bar. ' +
+      "The <b>shards</b> overlay tells you whether a command runs everywhere (near " + NSH +
+      " of " + NSH + " — universal infrastructure, observability, replication) or only on " +
+      "some (workload-specific, sometimes routed by key). A high-rate command running on " +
+      "very few shards is often the signature of a hot key.</p>");
   }));
 
   nav.innerHTML = SECS.map(([n, t]) => '<a href="#s' + n + '">' + n + ". " + esc(t) + "</a>").join("");

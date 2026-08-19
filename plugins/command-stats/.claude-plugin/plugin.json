@@ -3,7 +3,7 @@
   "name": "command-stats",
   "displayName": "Redis Command Stats",
   "description": "Analyse Redis Enterprise debuginfo support packages. Produces a per-database INFO commandstats report and screens package pairs for counter resets before any before/after comparison.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": {
     "name": "Nic Gibson",
     "email": "nic.gibson@redis.com"
